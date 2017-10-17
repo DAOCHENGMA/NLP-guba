@@ -1,0 +1,142 @@
+from bs4 import BeautifulSoup
+import random
+import socket
+import urllib.request, urllib.error, urllib.parse
+import http.cookiejar
+import time
+import json
+import collections
+import re
+import pandas as pd
+from pypinyin import lazy_pinyin
+import pypinyin
+from date import daypast
+def replaceCharEntity(htmlstr):#文本处理  
+    CHAR_ENTITIES={'nbsp':' ','160':' ',  
+                'lt':'<','60':'<',  
+                'gt':'>','62':'>',  
+                'amp':'&','38':'&',  
+                'quot':'"''"','34':'"',}  
+      
+    re_charEntity=re.compile(r'&#?(?P<name>\w+);')  
+    sz=re_charEntity.search(htmlstr)  
+    while sz:  
+        entity=sz.group()#entity全称，如>  
+        key=sz.group('name')#去除&;后entity,如>为gt  
+        try:  
+            htmlstr=re_charEntity.sub(CHAR_ENTITIES[key],htmlstr,1)  
+            sz=re_charEntity.search(htmlstr)  
+        except KeyError:  
+            #以空串代替  
+            htmlstr=re_charEntity.sub('',htmlstr,1)  
+            sz=re_charEntity.search(htmlstr)  
+    return htmlstr
+def filter_tags(htmlstr):#文本处理
+    #先过滤CDATA  
+    re_cdata=re.compile('//<!CDATA\[[>]∗//\]>',re.I) #匹配CDATA  
+    re_script=re.compile('<\s*script[^>]*>[^<]*<\s*/\s*script\s*>',re.I)#Script  
+    re_style=re.compile('<\s*style[^>]*>[^<]*<\s*/\s*style\s*>',re.I)#style  
+    re_br=re.compile('<br\s*?/?>')#处理换行  
+    re_h=re.compile('</?\w+[^>]*>')#HTML标签  
+    re_comment=re.compile('<!--[^>]*-->')#HTML注释  
+    s=re_cdata.sub('',htmlstr)#去掉CDATA  
+    s=re_script.sub('',s) #去掉SCRIPT  
+    s=re_style.sub('',s)#去掉style  
+    s=re_br.sub('\n',s)#将br转换为换行  
+    s=re_h.sub('',s) #去掉HTML 标签  
+    s=re_comment.sub('',s)#去掉HTML注释  
+    #去掉多余的空行  
+    blank_line=re.compile('\n+')  
+    s=blank_line.sub('\n',s)  
+    s=replaceCharEntity(s)#替换实体  
+    return s 
+class BrowserBase(object): 
+
+    def __init__(self):
+        socket.setdefaulttimeout(20)
+
+    def speak(self,name,content):
+        print('[%s]%s' %(name,content))
+
+    def openurl(self,url):
+        """
+        打开网页
+        """
+        cookie_support= urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+        self.opener = urllib.request.build_opener(cookie_support,urllib.request.HTTPHandler)
+        urllib.request.install_opener(self.opener)
+        user_agents = [
+                    'Mozilla/5.0 (Windows; U; Windows NT 5.1; it; rv:1.8.1.11) Gecko/20071127 Firefox/2.0.0.11',
+                    'Opera/9.25 (Windows NT 5.1; U; en)',
+                    'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322; .NET CLR 2.0.50727)',
+                    'Mozilla/5.0 (compatible; Konqueror/3.5; Linux) KHTML/3.5.5 (like Gecko) (Kubuntu)',
+                    'Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.0.12) Gecko/20070731 Ubuntu/dapper-security Firefox/1.5.0.12',
+                    'Lynx/2.8.5rel.1 libwww-FM/2.14 SSL-MM/1.4.1 GNUTLS/1.2.9',
+                    "Mozilla/5.0 (X11; Linux i686) AppleWebKit/535.7 (KHTML, like Gecko) Ubuntu/11.04 Chromium/16.0.912.77 Chrome/16.0.912.77 Safari/535.7",
+                    "Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:10.0) Gecko/20100101 Firefox/10.0 ",
+
+                    ] 
+       
+        agent = random.choice(user_agents)
+        self.opener.addheaders = [("User-agent",agent),("Accept","*/*"),('Referer','http://www.google.com')]
+        try:
+            res = self.opener.open(url).read()
+            res = res.decode('utf-8')
+            #print(res)
+            return res
+        except Exception as e:
+            self.speak(str(e),url)
+            self.openurl(url)
+if __name__=='__main__':
+    splider = BrowserBase()
+    period = 2
+    enddate= daypast().n_past(period)[-5:]
+    stockcode = ['600000','600016','600028','600029','600030','600036','600048','600050','600100','600104','600111','600340','600485',
+                 '600518','600519','600547','600606','600837','600887','600919','600958','600999','601006','601088','601166','601169',
+                 '601186','601198','601211','601229','601288','601318','601328','601336','601390','601398','601601','601628','601668',
+                 '601688','601766','601788','601800','601818','601857','601881','601901','601985','601988','601989']
+    for i in range(len(stockcode)):
+        ans = []
+        page = 1
+        while True:
+            res=splider.openurl('http://guba.eastmoney.com/list,'+stockcode[i]+',f_'+str(page)+'.html')
+            soup=BeautifulSoup(res, "html5lib")
+            l=2
+            if l==1:
+                print (soup.select('.l1'))
+            else:
+            #print(soup.prettify())
+                for item in soup.select('.articleh'):
+                    #print (item)
+                    comments = item.select('.l2')[0].string
+                    reads = item.select('.l1')[0].string
+                    txt = item.select('.l3')[0]
+                    if txt.find_all('em') :
+                        if txt.find_all('em')[0].attrs['class'] != ['himg']:
+                            newstype = txt.find_all('em')[0].string
+                        else:
+                            newstype = 'picture'
+                    else:
+                        newstype = 'normal'
+                    #print (newstype)
+                    txt = item.select('.l3')[0]
+                    if 'target' in txt.find_all('a')[0].attrs:
+                        title = txt.find_all('a')[0].string
+                        link = txt.find_all('a')[0].attrs['href']
+                    else:
+                        title = txt.find_all('a')[0].attrs['title']
+                        link = txt.find_all('a')[0].attrs['href']
+                    author = item.select('.l4')[0].find_all('a')[0].string
+                    posttime = item.select('.l6')[0].string
+                    updatetime = item.select('.l5')[0].string
+                    code = link[-14:-5]
+                    if newstype == 'normal' or newstype == 'picture':
+                        ans.append(([code, stockcode[i],comments, reads, newstype, author, link, posttime, updatetime]))
+                print (page)#([comments, reads, newstype, title, author, link, posttime, updatetime])
+                if posttime<=enddate:
+                    break
+            page+=1
+        df = pd.DataFrame(ans,columns = ['code', 'stockcode','comments', 'view', 'newstype', 'author', 'link', 'posttime', 'updatetime'])
+        df.to_csv('C:/Users/mdc/Desktop/Data_protocol/'+stockcode[i]+'_Sortbypost.txt', sep = ';',encoding = 'utf-8')
+
+	
